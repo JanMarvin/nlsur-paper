@@ -1,0 +1,565 @@
+---
+title: Estimating nonlinear equationsystems in \proglang{R} using \pkg{nlsur}
+author: Jan Marvin Garbuszus\thanks{Contact:\newline Ruhr-Universität Bochum \newline Universitätsstr. 150; D-44780 Bochum \newline  jan.garbuszus@ruhr-uni-bochum.de}
+abstract: |
+  \pkg{nlsur} is an \proglang{R}-package to estimate Nonlinear Least Squares (NLS). Estimation is possible for single equations as well as for equation systems. In addition to NLS it is possible to estimate Feasible Generalized NLS (FGNLS) or Iterative FGNLS (IFGNLS). The latter is equivalent to a Maximum Likelihood estimation  but easier to implement which makes IFGNLS a straight forward estimation procedure for many econometric models. This paper gives an short overview on the theory of nonlinear equation system estimation and provides examples of nlsur applications using common demand systems.
+output:
+  pdf_document:
+    includes:
+      in_header: preamble.tex
+bibliography: nlsur.bib
+keywords:
+  - nls
+  - fgnls
+  - ifgnls
+  - equation systems
+  - R
+---
+
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+library("nlsur")
+```
+
+# Introduction
+
+Although it is possible to estimate nonlinear least squares in \proglang{R} using `nls()` it is only possible to estimate single equations, but not equation systems which are of crucial interesst for  econometric demand analysis. While it is possible to estimate a single equation in \pkg{nlsur} the main focus is on the estimation of equation systems. Estimation of linear equation systems using \textit{seemingly unrelated regression} [SUR; @Zellner62] is implemented in \pkg{systemfit} [@systemfit].^[In \pkg{systemfit} a nlsur function using nonlinear optimization is implemented in command `nlsystemfit()`. This uses `nlm()` which is one of many different minimization algorithms implemented in \proglang{R}. Using this as a reference, different variations were tested to achieve estimation of IFGNLS. Unfortunately the many different algorithms lead to a wide range of results. \pkg{ucminf} [@ucminf] using a optimization algorithm by @Nielsen2000 appeared to provide the best results. On the contrary nonlinear optimization is computationally demanding and two estimations must not -- using identical starting values -- lead to identical results. Not to mention the absurd amount of memory and time required.] The \pkg{nlsur}-package extends \proglang{R} for the estimation of nonlinear equation systems, which implicitly follows the theory of linear equation system estimation. Nonlinear equation systems as well as FGNLS and IFGNLS are covered in @Greene [345ff.]. The linear pendant of Feasible GLS estimation is covered in @Wooldridge02 [157ff.].
+
+The packages most important command is `nlsur()`. This can be called with option `type = 1` to `3`. The first estimates a NLS, the second a FGNLS and the last an IFGNLS. The main reason for IFGNLS is that its result is comparable with those of a maximum likelihood estimation [see @Greene, 349]. The estimation process of equation systems is comparable to single equation estimation. Because of this either equation systems or single equations can be solved with \pkg{nlsur}. In the case of single equation estimation the result is comparable to `nls()` which uses the relative offset convergence criteria [@Bates81]. In both cases a Gauss-Newton approach is used for solving.
+
+A nonlinear equation estimation can be seen as follows, for a equation system of $N$ observations and $M$ equations it can be written as a stacked equation system
+
+\begin{align} \label{eqsystem}
+\mathbf{y}_i &= \mathbf{f}_i(\bm{\beta}, \mathbf{X}) + \mathbf{\epsilon}_i, & \text{for }i = 1, \dots, M.
+\intertext{with}
+\epsilon &\sim \mathcal{N}\left(0,\mathbf{\Sigma}\right).
+\end{align}
+
+This equation system contains $K$ parameters that spread over the equations. Aside from that, no further restriction is set on the distribution of the parameters in the equations. They can all be in a single equation or spread over the full equation system.
+
+Written as (\ref{eqsystem}) NLS minimizes
+\begin{align}
+ SSR(\hat{\bm{\beta}}) &= \sum_{i=1}^N \left\{\mathbf{y}_i - \mathbf{f}_i(\bm{\beta}, \mathbf{X})\right\}' \mathbf{\Sigma}^{-1} \left\{\mathbf{y}_i - \mathbf{f}_i(\bm{\beta}, \mathbf{X})\right\}
+\end{align}
+
+The $M \times M$ weighting matrix $\mathbf{\Sigma} = E(\epsilon_i'\epsilon_i)$ is mostly unknown. Because of this the identity matrix is used. In case of stacked equations $\mathbf{\Sigma}$ can be written as $\mathbf{\Sigma} \otimes \mathbf{I}$. Therefore in the first step NLS is an inefficient estimator, not controlling for parameters spreading over the equations. As a variant in a first step equation per equation could be solved using NLS [@Greene 346]. Although inefficient the estimator is consistent. From its residuals the new weighting matrix $\hat{\mathbf{\Sigma}}$ can be estimated as
+\begin{align}
+ \hat{\mathbf{\Sigma}} &= \frac{1}{N} \mathbf{\epsilon}'\mathbf{\epsilon}
+\end{align}
+
+For FGNLS estimation this new weighting matrix is chosen, which creates another weighting matrix. This is selected in IFGNLS and is iteratively repeated until convergence is reached.^[Usually modifications of coefficients or changes in the weighting matrix is chosen.]
+
+Following @Judge88 the asymptotic co-variance matrix $\mathbf{V}$ is obtained as
+\begin{align}
+ \mathbf{V} &= \left( \mathbf{J}' \hat{\mathbf{\Sigma}}^{-1} \mathbf{J} \right)^{-1}.
+\end{align}
+$\mathbf{J}$ is the Jacobian, the matrix of the partial deviations evaluated at the parameters.
+
+@Wooldridge02[160] discusses FGLS and notes the estimation of a robust co-variance matrix following White as
+\begin{align}
+ \mathbf{V} &= \left( \mathbf{J}' \hat{\mathbf{\Sigma}}^{-1} \mathbf{J} \right)^{-1}
+ \left({\mathbf{J}}' \hat{\mathbf{\Sigma}}^{-1} \hat{\mathbf{\epsilon}} {\hat{\mathbf{\epsilon}}}' \hat{\mathbf{\Sigma}}^{-1}\mathbf{J}\right)
+ \left( \mathbf{J}' \hat{\mathbf{\Sigma}}^{-1} \mathbf{J} \right)^{-1}
+\end{align}
+
+For IFGNLS an additional log likelihood can be estimated [@Davidson2004 521]. This is given by
+\begin{align}
+ \ln L &= -\frac{MN}{2} (1 + \log 2\pi) - \frac{N}{2} \log |\hat{\mathbf{\Sigma}}|.
+\end{align}
+
+For estimation in \proglang{R} two different approaches are usable. One relying on a weighted GLS comparable to the implementation of `lm.gls()` in \pkg{MASS} and a second approach relying on blockwise matrix multiplication using an approach close to the one implemented in @stata_nlsur.^[The \pkg{MASS} estimation using weighted generalized least squares cannot handle sparse matrices, thus a memory efficient replacement was implemented.]
+
+
+## Implementation
+
+Using spare matrices from \pkg{Matrix} [@Matrix] NLS is able to estimate NLS using bigger data sets. \pkg{Matrix} is required because the stacking of $\hat{\mathbf{\Sigma}}$ as $\hat{\mathbf{\Sigma}} \otimes \mathbf{I}$. The resulting matrix is of size $MN \times MN$. Which leads even with a small equation set and a moderate $N$ to a huge matrix demanding much memory (e.g., a matrix of size $N = 3$ and $M = 10000$ requires 3.6 GB ram). The \pkg{Matrix} package allows creation of the Kronecker product from $\hat{\mathbf{\Sigma}}$ and $\mathbf{I}$ as sparse matrix. Although this variant is way more efficient, huge datasets and moderate number of equations still require a workstation with lots of ram.
+
+NLS using a blockwise matrix solution is memory efficient. Starting from the idea that $\mathbf{\Sigma}^{-1}$ can be decomposed into a new matrix $\mathbf{D}$ using cholesky-decomposition such that $\mathbf{D}\mathbf{D}' = \mathbf{\Sigma}^{-1}$. Postmultiplication with $\mathbf{D}$ leads to
+\begin{align} \label{useChol}
+ \mathbf{y}_i\mathbf{D} &= \mathbf{f}_i(\bm{\beta}, \mathbf{X})\mathbf{D} + \mathbf{\epsilon}_i\mathbf{D}, & \text{for }i = 1, \dots, M
+\end{align}
+Since $E(\mathbf{D}'{\mathbf{u}'_i}\mathbf{u}_i\mathbf{D}) = \mathbf{I}$ all the equations can be stacked and solved columnwise
+
+\begin{align} \nonumber
+ \mathbf{y}_1\mathbf{D}_1 &= \mathbf{f}(\mathbf{x}_1, \bm{\beta})\mathbf{D}_1 + \tilde{u}_{11} \\  \nonumber
+ \mathbf{y}_1\mathbf{D}_2 &= \mathbf{f}(\mathbf{x}_1, \bm{\beta})\mathbf{D}_2 + \tilde{u}_{12} \\  \nonumber
+ \vdots \\  \nonumber
+ \mathbf{y}_1\mathbf{D}_M &= \mathbf{f}(\mathbf{x}_1, \bm{\beta})\mathbf{D}_M + \tilde{u}_{1M} \\  \nonumber
+ \vdots \\ \nonumber
+ \mathbf{y}_N\mathbf{D}_1 &= \mathbf{f}(\mathbf{x}_N, \bm{\beta})\mathbf{D}_M + \tilde{u}_{N1} \\ \nonumber
+ \mathbf{y}_N\mathbf{D}_2 &= \mathbf{f}(\mathbf{x}_N, \bm{\beta})\mathbf{D}_M + \tilde{u}_{N2} \\ \nonumber
+ \vdots \\ \nonumber
+ \mathbf{y}_N\mathbf{D}_M &= \mathbf{f}(\mathbf{x}_N, \bm{\beta})\mathbf{D}_M + \tilde{u}_{NM}
+\end{align}
+
+This can be solved -- like the univariate case -- with Gauss-Newton [@Davidson2004 228ff.; @Bates1988 Chap. 2].
+\begin{align}
+ SSR(\bm{\beta}) &= \left\{\mathbf{y} - \mathbf{f}(\mathbf{x}, \bm{\beta})\right\}'\mathbf{\Sigma}^{-1} 
+ \left\{ \mathbf{y} - \mathbf{f}(\mathbf{x}, \bm{\beta})\right\}
+\end{align}
+A second order Taylor-expansion centered on $\beta_0$ gives
+\begin{align}\label{taylor}
+ SSR(\bm{\beta}) &= SSR(\bm{\beta}_0) + g'(\bm{\beta}_0)(\bm{\beta}-\bm{\beta}_0) + \frac{1}{2}(\bm{\beta}-\bm{\beta}_0)'\mathbf{H}(\bm{\beta}_0)(\bm{\beta}-\bm{\beta}_0)
+\end{align}
+with the gradient $\mathbf{g}(\cdot)$ and the Hessian $\mathbf{H}(\cdot)$. Solving for $\beta$:
+\begin{align}
+ \label{gradient}
+ \mathbf{g}(\bm{\beta}) &= -2{\mathbf{J}}'\mathbf{\Sigma}^{-1}\mathbf{u}
+\end{align}
+The Hessian can be approximated with
+\begin{align}
+ \label{hesssche}
+ \mathbf{H}(\bm{\beta}) &= 2{\mathbf{J}}'\mathbf{\Sigma}^{-1}\mathbf{J}
+\end{align}
+Solving (\ref{taylor}) and applying first order conditions for a minimum:
+\begin{align}
+ \mathbf{g}(\bm{\beta}_0) +\mathbf{H}(\bm{\beta}_0)(\bm{\beta} - \bm{\beta}_0) &= \mathbf{0}.
+\end{align}
+This can be solved iteratively as
+\begin{align} \label{iterative}
+ \bm{\beta}_{j+1} &= \bm{\beta}_j - \alpha \mathbf{H}^{-1}(\bm{\beta}_j)\mathbf{g}(\bm{\beta}_j)
+\intertext{and (\ref{gradient}) and (\ref{hesssche}) give}
+ \label{neuebeta}
+ \bm{\beta}_{j+1} &= \bm{\beta}_j + \alpha ({\mathbf{J}}'\mathbf{\Sigma}^{-1}\mathbf{J})^{-1}
+ {\mathbf{J}}'\mathbf{\Sigma}^{-1}\mathbf{u}
+\end{align}
+with the stepsize parameter $\alpha$, based on @Box1960 and @Hartley1961 with $\alpha \in [0, 1]$. Aside from $\alpha$ (\ref{neuebeta})  can be estimated via weighted regression of $\mathbf{J}$ on $\mathbf{u}$. If no weighting matrix is present and $\mathbf{\Sigma} = \mathbf{I}$ no weighting is required.
+
+# Code
+
+Depending on the selected estimation type `nlsur()` calls the function `.nlsur()` which will create an object of class `nlsur()`. While the function `.nlsur()` is called to estimate a single iteration of `nls()` it should not be called by the user directly.
+
+## NLS
+
+Per default \pkg{nlsur} sets the vector of starting values to $0$ and makes them available for evaluation. In addition LHS and RHS are evaluated. This leads to estimates of the residuals and the Jacobian. Estimation of the sum of squared residuals (SSR) requires the residuals and the cholesky decomposition of the weighting matrix. To speed this up, the calculation is done using \pkg{RcppArmadillo} [@RcppArmadillo2014].
+
+\begin{verbatim}
+for (int j = 0; j < k; ++j) {
+    for (int i = 0; i < n; ++i){
+      ssr += w(i) * pow( r.row(i) * s.col(j), 2);
+    }
+  }
+\end{verbatim}
+This is exactly
+\begin{align}
+ SSR(\bm{\beta}) &= \mathbf{u}'\mathbf{D}'\mathbf{D}\mathbf{u}.
+\end{align}
+
+Now a while-loop is started and repeated until convergence is reached. The inital stepsize parameter $\alpha$ is set to one. If no weighting matrix is provided for a first step NLS can be solved without a weighting matrix in form of a QR-decomposition if `qrsolve = TRUE`. Otherwise a initial weighting $\hat{\mathbf{\Sigma}}^{-1}$ is the identity matrix $\mathbf{I}$ where every element on the diagonal equals $1$ which reduces the WLS to the default matrix equation
+\begin{align}
+ \mathbf{\theta} &= ({\mathbf{J}}'\mathbf{J})^{-1}  {\mathbf{J}}'\mathbf{u}
+\end{align}
+This result is added to a new while loop that estimates a new $\bm{\beta}$ until
+\begin{align}
+SSR(\bm{\beta}_i) > SSR(\bm{\beta}_{i-1}).
+\end{align}
+$\bm{\beta}_i$ is calculated using (\ref{neuebeta}) as
+\begin{align}
+\bm{\beta}_{i+1} &= \bm{\beta}_i + \alpha \bm{\theta}_i.
+\end{align}
+Startvalues for this are $\bm{\beta}$, $\alpha = 1$ and $\bm{\theta}_i$ the previous calculated regression coefficients. The newly estimated $\bm{\beta}$-values are used to calculate a new $SSR$. If convergence is not reached, $\alpha$ will become $\alpha/2$ and new $\bm{\beta}$-candidates are estimated.
+
+If this loop is stopped a check for convergence is done. Convergence is reached if both criteria are met:
+
+1.  $| SSR_{i-1} - SSR| \leq \epsilon (SSR_{i-1} + \tau)$ This is a minor deviation from @Gallant1987 [29] who suggests $<$ instead.
+2.  The second is $m = 1, \dots, k$ the convergence criteria is $\alpha|\bm{\theta}_{jm}| \leq \epsilon (|\bm{\beta}_{j-1,m}| + \tau)$. While $\bm{\theta}_j$ is the result of the weighted regression.
+
+If no convergence is reached, the last SSR is the new convergence criteria. The stepsize parameter is doubled. The dublication can continue until a maximum value of $1$ is reached. This is identical to the implementation of `nls()`.
+
+Once this first estimation is done the result is comparable to the results of `nls()`. To get `nls()` results matching to the Stata command `nlsur()` a second evaluation is done using the diagonal of the last weighting matrix $\mathbf{\Sigma}$ which replaces the diagonal values of $\mathbf{I}$. In \pkg{nlsur} this can be achieved using the option `stata = TRUE`. This option only has influence on the results of the NLS estimation.
+
+
+## FGNLS
+
+If FGNLS is estimated the $\bm{\beta}$ coefficients of the NLS stage and the weighting matrix $\mathbf{\Sigma}$ are selected as start values for the NLS estimation. The most important difference is that the estimation can no longer rely only on GLS but requires a WLS estimation. This can be calculated using QR-decomposition and sparse matrices or blockwise using a matrix algorithm suggested by @stata_nlsur. As said before the `lm.gls()` function of \pkg{MASS} cannot be used since it calculates a singular value decomposition of the weight matrix and even if the latter can be a sparse matrix, during calculation of the eigen values a dense matrix is returned.
+
+Fortunately this can be overcome using the smaller $\hat{\mathbf{\Sigma}}$ returned by `nlsur()` and estimation of the eigen values before calculating the Kronecker product. This requires the option `MASS = TRUE`.
+\begin{verbatim}
+lm_gls <- function(X, Y, W, neqs, tol = 1e-7, covb = FALSE) {
+
+  eW <- eigen(W, TRUE)
+  d <- eW$values
+  if (any(d <= 0))
+    stop("'W' is not positive definite")
+
+  A <- diag(d^-0.5,
+            nrow = length(d),
+            ncol = length(d)) %*% t(eW$vectors)
+
+  n <- nrow(X)/neqs
+
+  A <- Matrix::kronecker(X = A,
+                         Y = Matrix::Diagonal(n))
+
+  X <- as(X, "sparseMatrix"); Y <- as(Y, "sparseMatrix")
+
+  if (covb)
+    fit <- Matrix::crossprod(A %*% X)
+
+  if (!covb)
+    fit <- qr.coef(qr(A %*% X, tol = tol), A %*% Y)
+
+  fit
+}
+\end{verbatim}
+
+This is the numerically stable option. In a blockwise matrix algebra approach the same can be solved as
+
+\begin{verbatim}
+SEXP calc_reg (arma::Mat<double> x, arma::Mat<double> r, arma::Mat<double> qS,
+               arma::Col<double> w, int sizetheta, bool fullreg, double tol) {
+
+  arma::Mat<double> XDX(sizetheta, sizetheta, fill::zeros);
+  arma::Mat<double> XDy(sizetheta, 1, fill::zeros);
+
+  Function Rf_qr("qr");
+  Function Rf_qrcoef("qr.coef");
+
+  int n = r.n_rows;
+  int k = r.n_cols;
+
+  for (int i = 0; i < n; ++i) {
+
+    arma::Mat<double> XI = arma_reshape(x.row(i), k);
+    XDX += w(i) * XI.t() * qS * XI;
+
+    if (fullreg) {
+      arma::Mat<double> YI = r.row(i).t();
+      XDy += w(i) * XI.t() * qS * YI;
+    }
+
+  }
+
+  XDX = 0.5 * (XDX + XDX.t());
+
+  if (fullreg) /* weighted regression */
+    return Rf_qrcoef(Rf_qr(XDX, _["tol"] = tol), XDy);
+  else         /* covb */
+    return wrap(XDX);
+}
+\end{verbatim}
+
+This is the memoryefficient default estimation option implemented for speed in \pkg{RcppArmadillo}.
+
+## IFGNLS
+
+At the initial stage for IFGNLS a FGNLS is estimated. Based on the results of the FGNSL estimates a new while-loop using its own convergence criterium is started. Again another NLS estimation is started based on the last coefficients and the weighting matrix.
+
+The estimated residuals and the cholesky-decomposition of the inverse of the weighting matrix are used to calculate a new SSR. Based on the relative change of the weighting matrix and the coefficients two criteria are needed. For the coefficients the change should be smaller than $\epsilon$ and for $\mathbf{\Sigma}$ it is $10^{-10}$. Once both criteria are met convergence is declared and the log likelihood is estimated.
+
+
+## Following I/FG/NLS
+
+Following the estimation a number of different results may be obtained. Calling print on the nlsur-object returns the coefficients as well as `coef()`. A summary is returned by `summary()`. In addition this command tries to evaluate weather or not a equation contains a constant or not. The variance co-variance matrix is returned by `cvov()` which works for `nlsur` just like `residuals()`, `deviance()`, `df.residuals()`, `fitted()`, `logLik()`, `convint()` or `predict()`.
+
+# Application
+
+## nlsur vs nls
+
+`nlsur` can be used as well as `nls` for the estimation of nonlinear least squares. Differences are in the implementation. `nls` uses the relative offset criteria by @Bates81 this was not implemented for `nlsur` because it would require weighting of $\mathbf{J}$ in (\ref{neuebeta}). Therefore `nlsur` uses the same convergence criteria @stata_nlsur uses. For a simple linear model estimation using `lm`, `nls` and `nlsur` returns the same coefficients
+
+```{r modelcomp, cache=TRUE}
+data( "mtcars" )
+model <- c("mpg ~ beta0 + beta1 * cyl + beta2 * am")
+
+res1 <- res2 <- res3 <- NULL
+
+res1 <- lm(mpg ~ cyl + am, data = mtcars)
+res2 <- nlsur(model, data = mtcars, type = 1, stata = FALSE)
+res3 <- nls(model, data = mtcars, start = c(beta0=0,beta1=0,beta2=0))
+
+summary(res2)
+```
+```{r print_modelcomp, cache=TRUE, echo=FALSE}
+res <- rbind( coef(res1), coef(res2), coef(res3))
+
+dimnames(res) <- list(c("lm", "nls", "nlsur"),
+                      c("beta0", "beta1", "beta2"))
+
+print(res)
+```
+
+
+`nlsur` is not as strict as `nls` is concerning artificial data and finds solutions in models containing constant variables.
+
+```{r modelcomp2, cache=TRUE}
+
+# estimate the same model with a constant variable
+mtcars <- subset(mtcars, am == 1)
+
+res1 <- res2 <- res3 <- NULL
+
+res1 <- lm(mpg ~ cyl + am, data = mtcars)
+res2 <- nlsur(model, data = mtcars, type = 1, stata = FALSE)
+try(res3 <- nls(model, data = mtcars, start = c(beta0=0,beta1=0,beta2=0)))
+# nls does not find a solution
+
+summary(res2)
+```
+
+
+```{r print_modelcomp2, cache=TRUE, echo=FALSE}
+# comparisson of lm, nls and nlsur
+res <- rbind( coef(res1), coef(res2), coef(res3))
+
+dimnames(res) <- list(c("lm", "nlsur"),
+                      c("beta0", "beta1", "beta2"))
+
+# print(res)
+```
+
+
+## equation systems I: Translog
+
+A well known application for FGNLS is \textit{example 10.3 a cost function for U.S. Manufacturing} in @Greene[353f.]. A Translog is estimated for four goods. Model and data are from @Berndt1975. For estimation purposes a single equation is dropped and the parameters of the dropped equation are evaluated after the estimation.
+
+\begin{align}
+\begin{array}{cccrrrrrr} \label{eqn:tl}
+s_k &=& \beta_k &+ &\delta_{kk}  \ln\left(\frac{p_k}{p_m}\right) &+& \delta_{kl} \ln\left(\frac{p_l}{p_m}\right) &+& \delta_{ke}  \ln\left(\frac{p_e}{p_m}\right) \\
+s_l &=& \beta_l &+ &\delta_{kl}  \ln\left(\frac{p_k}{p_m}\right) &+& \delta_{ll} \ln\left(\frac{p_l}{p_m}\right) &+& \delta_{le}  \ln\left(\frac{p_e}{p_m}\right) \\
+s_e &=& \beta_e &+ &\delta_{ke}  \ln\left(\frac{p_k}{p_m}\right) &+& \delta_{le} \ln\left(\frac{p_l}{p_m}\right) &+& \delta_{ee}  \ln\left(\frac{p_e}{p_m}\right)
+\end{array}
+\end{align}
+\begin{align}
+\intertext{with} \label{eqn:tlr}
+\sum_{i=1}^M \beta_i &= 1; \sum_{i=1}^M \delta_{ij} = \sum_{j=1}^M \delta_{ij} = 0
+\end{align}
+
+```{r translog, cache=TRUE}
+data( "costs" )
+
+dd <- costs
+# apply a patch to create Greenes Ed. 7 Data
+dd$Sm[dd$Year == 1958] <- 0.61886
+dd$Pe[dd$Year == 1950] <- 1.12442
+dd$Pm[dd$Year == 1949] <- 1.06625
+
+eqns <- list(
+  Sk ~ bk + dkk * log(Pk/Pm) + dkl * log(Pl/Pm) + dke * log(Pe/Pm),
+  Sl ~ bl + dkl * log(Pk/Pm) + dll * log(Pl/Pm) + dle * log(Pe/Pm),
+  Se ~ be + dke * log(Pk/Pm) + dle * log(Pl/Pm) + dee * log(Pe/Pm)
+)
+
+erg <- nlsur(eqns = eqns, data = dd, type = 2, trace = FALSE, eps = 1e-10)
+
+```
+
+The missing parameters are estimated using `nlcom()` using the parameter restrictions of (\ref{eqn:tl}).
+
+```{r nlcom_translog, cache=TRUE}
+# nlcom
+bm  <- nlcom(object = erg, form = "1 -be -bk -bl", rname= "bm")
+dkm <- nlcom(object = erg, form = "-dkk -dkl -dke", rname = "dkm")
+dlm <- nlcom(object = erg, form = "-dkl -dll -dle", rname = "dlm")
+dem <- nlcom(object = erg, form = "-dke -dle -dee", rname = "dem")
+dmm <- nlcom(object = erg, form = "-dkm -dlm -dem", rname = "dmm")
+```
+
+
+```{r nlcom_translog_res, echo=FALSE}
+# get all results
+est <- summary(erg)$coefficients
+ind <- rbind(bm, dkm, dlm, dem, dmm)
+
+res <- rbind(est, ind)
+res <- res[order(rownames(res)),]
+```
+
+Once all parameters of the Translog are estimated, they can be combined. The full coefficients of the translog model above are:
+
+```{r print_nlcom_translog_res, echo=FALSE}
+printCoefmat(as.data.frame(res), digits = 8)
+```
+
+
+This application uses `nlcom()` a command to estimate nonlinear combinations from objects of class nlsur. Mainly `nlcom()` is a wrapper around the delta method function `dm()` and mimics the `nlcom()` command of @stata_nlcom. The command can be used to estimate parameters that are combinations of other nlsur based parameters and select other nlcom parameters out of the same environment. In the case above this is used to estimate standard errors and confidence intervals for the parameter restrictions of the Translog.
+
+
+## equation systems II: AI-system
+
+A second example is given by the application of the Almost-Ideal Demand System (AI-system) by @Deaton80. The AI-system is given by
+\begin{align}
+ w_i &= \alpha_i + \sum_j \gamma_{ij} \log p_j + \beta_i \log \{ x / P \} \\ \label{eqn:aitlp}
+ \intertext{with:}
+ \log P &= \alpha_0 + \sum_k \alpha_k \log p_k + \frac{1}{2} \sum_j \sum_k \gamma_{kj} \log p_k \log p_j
+\end{align}
+\begin{align}
+ \sum_{i=1}^n \alpha_i &= 1 & \sum_{i=1}^n \gamma_{ij} &= 0 & \sum_j \gamma_{ij} &= 0 & \gamma_{ij} &= \gamma_{ji}
+\end{align}
+@Deaton80 suggest aside the translog price index (as in (\ref{eqn:aitlp})) a modification using the Stone-price index $\log P = \sum w_k * \log p_k$ as a complete linearized AI-system (LA-AI). Such a model is implemented in the \pkg{micEconAids}-package by @Henningsen14.
+The estimation of the AI-system is based on a data set by @Blanciforti86 that is part of \pkg{micEconAids}. The model estimated is based on four food commodities. As shown before missing parameters of the AI-system are estimated using `nlcom()`. Final results are compared to the results of an LA-AI-system estimated with SUR using @Henningsen14. The equation of the AI-system are created using `ai.model()`. This is an example function of a demand system model builder taking care of the restrictions of such models. This precise function is able to create AI-system equations using either the translog or the Stone price index, demographicaly scaled versions of this demand system as well as Quadratic Almost-Ideal Demand System variations of such models. Once such an implementation is complete it is straightforward to wrap the equation in a function such as `ai()` or `qai()`.
+
+```{r aids, cache=TRUE}
+library( "micEconAids" )
+
+data( "Blanciforti86" )
+# Good data part
+Blanciforti86 <- Blanciforti86[ 1:32, ]
+
+# define parameters
+bgs <- c( "wFood1", "wFood2", "wFood3", "wFood4" )
+pid <- c( "pFood1", "pFood2", "pFood3", "pFood4" )
+exp <- "xFood"
+
+# estimates using aidsEst
+estResult <- aidsEst( priceNames = pid, shareNames = bgs, totExpName = exp,
+                      data = Blanciforti86, priceIndex = "S",
+                      method = "LA", estMethod = "SUR")
+
+# build the AI-system equation
+model <- ai.model(w = bgs, p = pid, exp = exp, priceindex = "S",
+                  logp = FALSE, logexp = FALSE)
+
+estNlsur <- nlsur(eqns = model, data = Blanciforti86, MASS = TRUE,
+                  type = "FGNLS", qrsolve = FALSE)
+
+# nlsur
+summary(estNlsur)
+```
+
+
+```{r nlcom_aids, cache=TRUE}
+### caclulate missing parameters via AI-system restrictions
+
+# sum a_k = 1
+a04 <- nlcom(object = estNlsur,
+             form = "1- (a01 + a02 + a03)", rname = "a04")
+
+# sum b_k = 0
+b04 <- nlcom(object = estNlsur,
+             form = " - (b01 + b02 + b03)", rname = "b04")
+
+# sum g_ij = 0
+g0104 <- nlcom(object = estNlsur,
+               form = " (-g0101 - g0102 - g0103)", rname = "g0104")
+g0204 <- nlcom(object = estNlsur,
+               form = " (-g0102 - g0202 - g0203)", rname = "g0204")
+g0304 <- nlcom(object = estNlsur,
+               form = " (-g0103 - g0203 - g0303)", rname = "g0304")
+g0404 <- nlcom(object = estNlsur,
+               form = " (-g0104 - g0204 - g0304)", rname = "g0404")
+
+# g_ij = g_ji
+g0201 <- nlcom(object = estNlsur, form = "g0102", rname = "g0201")
+g0301 <- nlcom(object = estNlsur, form = "g0103", rname = "g0301")
+g0302 <- nlcom(object = estNlsur, form = "g0203", rname = "g0302")
+g0401 <- nlcom(object = estNlsur, form = "g0104", rname = "g0401")
+g0402 <- nlcom(object = estNlsur, form = "g0204", rname = "g0402")
+g0403 <- nlcom(object = estNlsur, form = "g0304", rname = "g0403")
+```
+
+
+
+Once all the parameters of the restricted model using `nlsur()` and the missing ones using `nlcom()` are obtained it is possible to directly compare `nlsur()` and `aidsEst()` results. Therefore the parameters and their differences are shown:
+
+```{r compare_systems, cache=TRUE, echo=FALSE}
+est <- rbind(coef(summary(estNlsur)),
+             a04, b04, g0104, g0204, g0304, g0404,
+             g0201, g0301, g0302, g0401, g0402, g0403)
+
+est <- est[sort(rownames(est)),]
+# printCoefmat(as.data.frame(est))
+
+x1 <- as.vector(unlist(est[,1]))
+
+x2 <- as.vector(unlist(coef(estResult)))
+
+# compare nlsur to aidsEst
+# all.equal(x1, x2)
+
+dat <- cbind(x1, x2, x1-x2)
+dimnames(dat) <- list(rownames(est), c("nlsur", "micEcon", "diff"))
+
+print(dat)
+```
+
+
+##  equation systems III: QAI-system
+
+In addition to the estimation of the AI-system @Poi12 proposed a function to estimate the Quadratic Almost-Ideal Demand System (QAI-system) by @Banks97 using demographic scaling as proposed by @Ray83. Estimation of such a demographicaly scaled model is possible with \pkg{nlsur} as well. Either it is possible to create the equation system using the `ai.model()` builder as shown in the previous section or simply by using the `qai()` function.^[For the Almost-Ideal Demand System using the translog price index there exists a matching function `ai()`. Both incorporate the same scaling functions.] This function is a wrapper around the model builder and `nlsur()` and provides an easy way to estimate an QAI-system using the translog prices index. For now only the directly estimated parameters are returned although it is possible to estimate the missing parameters afterwards.
+
+```{r readstata, echo=FALSE}
+library(readstata13)
+dat <- read.dta13("food.dta")
+```
+
+```{r qai, cache=TRUE}
+# dataset as proposed in Poi 2012. Stata results for comparisson available at
+# http://www.stata-journal.com/article.html?article=st0268
+
+w <- c("w1", "w2", "w3", "w4"); p <- c( "p1", "p2", "p3", "p4")
+x <- "expfd"; z <- c("nkids", "rural")
+
+res <- qai(w = w, p = p, x = x, z = z, a0 = 10,
+           data = dat, scale = TRUE,
+           logp = FALSE, logexp = FALSE,
+           MASS = TRUE)
+
+summary(res)
+```
+
+
+##  Application: Weighting
+
+Although weighting is possible in `nlsur()`, it is only available using the blockwise matrix variation of the nlsur solution.
+```{r weighting, cache=TRUE}
+
+# weighting
+set.seed(123)
+
+dd <- data.frame(y = rnorm(n = 100, mean = 5, sd = 5),
+                 x = rnorm(n = 100, mean = 2, sd = 5),
+                 w = sample(x = seq(0,1,0.1), size = 100, replace = TRUE))
+
+
+model <- "y ~ b * x"
+res_nlsur <- nlsur(eqns = model, data = dd, weights = w)
+```
+
+```{r nls, echo=FALSE}
+res_lm    <- lm("y~0+x", data = dd, weights = w)
+res_nls   <- nls(formula = model, data = dd, weights = w, start = c(b=0))
+
+res <- c(coef(res_lm), coef(res_nls), coef(res_nlsur))
+names(res) <- c("lm", "nls", "nlsur")
+
+print(res)
+```
+
+
+# Application: QAI/AI elasticities
+
+Using `elasticities()` one can has postestimation options after `ai()` or
+`qai()`.
+
+Formula for the expenditure (income) elasticity
+
+\begin{align}
+\mu_i &= 1 + \frac{1}{w_i} \left[ \beta_i + \frac{2\lambda_i}{b(\mathbf{p})} *
+  ln \left\{\frac{m}{a(\mathbf{p})} \right\}\right]
+\end{align}
+
+Formula for the uncompensated price elasticity
+
+\begin{align}
+\epsilon_{ij} &= \delta_{ij} + \frac{1}{w_i} \left( \gamma_{ij} - \beta_i +
+  \frac{2\lambda_i}{b(\mathbf{p})} \right) \left[\ln \left\{
+  \frac{m}{a(\mathbf{p})}\right\} \right] \times \\
+  & \left(\alpha_j + \sum_k \gamma_{jk} \ln p_k \right) -
+  \frac{\beta_j \lambda_i}{b(\mathbf{p})} \left[
+   \ln \left\{ \frac{m}{a(\mathbf{p})} \right\}\right]
+\end{align}
+
+Compensated price elasticitys (Slutsky equation)
+
+\begin{align}
+  \epsilon_{ij}^{C} &= \epsilon_{ij} + \mu_i w_j
+\end{align}
+
+
+# Conclusion
+
+With its ability to estimate demand systems \pkg{nlsur} closes a gap considering the estimation of equation systems in \proglang{R}. Not only \pkg{nlsur} enable the estimation of feasible NLS moreover does it extend the focus to the estimation of parametric equation systems. Whilst the estimation of SUR is implemented quite some time now, \pkg{nlsur} allows the the estimation of nonlinear SUR and thus increases the application of \proglang{R} to allow the estimation of recent demand systems. As shown `nlsur()` allows the estimation of many flexible demand systems along the lines of the previous demonstrated Translog or variants of the AI-system. Additional models are easily to implement as shown with the `ai.model()` equation builder. These models often come with restrictions to its parameters. In such cases `nlcom()` can be used to estimate the restricted parameters. Examples of these were given.
+
+
+# References
