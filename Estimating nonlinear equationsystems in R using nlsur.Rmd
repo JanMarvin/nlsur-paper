@@ -258,7 +258,7 @@ Following the estimation a number of different results may be obtained. Calling 
 
 `nlsur` can be used as well as `nls` for the estimation of nonlinear least squares. Differences are in the implementation. `nls` uses the relative offset criteria by @Bates81 this was not implemented for `nlsur` because it would require weighting of $\mathbf{J}$ in (\ref{neuebeta}). Therefore `nlsur` uses the same convergence criteria @stata_nlsur uses. For a simple linear model estimation using `lm`, `nls` and `nlsur` returns the same coefficients
 
-```{r modelcomp, cache=TRUE}
+```{r modelcomp, cache=FALSE}
 data( "mtcars" )
 model <- c("mpg ~ beta0 + beta1 * cyl + beta2 * am")
 
@@ -270,7 +270,7 @@ res3 <- nls(model, data = mtcars, start = c(beta0=0,beta1=0,beta2=0))
 
 summary(res2)
 ```
-```{r print_modelcomp, cache=TRUE, echo=FALSE}
+```{r print_modelcomp, cache=FALSE, echo=FALSE}
 res <- rbind( coef(res1), coef(res2), coef(res3))
 
 dimnames(res) <- list(c("lm", "nls", "nlsur"),
@@ -282,7 +282,7 @@ print(res)
 
 `nlsur` is not as strict as `nls` is concerning artificial data and finds solutions in models containing constant variables.
 
-```{r modelcomp2, cache=TRUE}
+```{r modelcomp2, cache=FALSE}
 
 # estimate the same model with a constant variable
 mtcars <- subset(mtcars, am == 1)
@@ -298,7 +298,7 @@ summary(res2)
 ```
 
 
-```{r print_modelcomp2, cache=TRUE, echo=FALSE}
+```{r print_modelcomp2, cache=FALSE, echo=FALSE}
 # comparisson of lm, nls and nlsur
 res <- rbind( coef(res1), coef(res2), coef(res3))
 
@@ -325,7 +325,7 @@ s_e &=& \beta_e &+ &\delta_{ke}  \ln\left(\frac{p_k}{p_m}\right) &+& \delta_{le}
 \sum_{i=1}^M \beta_i &= 1; \sum_{i=1}^M \delta_{ij} = \sum_{j=1}^M \delta_{ij} = 0
 \end{align}
 
-```{r translog, cache=TRUE}
+```{r translog, cache=FALSE}
 data( "costs" )
 
 dd <- costs
@@ -346,7 +346,7 @@ erg <- nlsur(eqns = eqns, data = dd, type = 2, trace = FALSE, eps = 1e-10)
 
 The missing parameters are estimated using `nlcom()` using the parameter restrictions of (\ref{eqn:tl}).
 
-```{r nlcom_translog, cache=TRUE}
+```{r nlcom_translog, cache=FALSE}
 # nlcom
 bm  <- nlcom(object = erg, form = "1 -be -bk -bl", rname= "bm")
 dkm <- nlcom(object = erg, form = "-dkk -dkl -dke", rname = "dkm")
@@ -389,7 +389,7 @@ A second example is given by the application of the Almost-Ideal Demand System (
 @Deaton80 suggest aside the translog price index (as in (\ref{eqn:aitlp})) a modification using the Stone-price index $\log P = \sum w_k * \log p_k$ as a complete linearized AI-system (LA-AI). Such a model is implemented in the \pkg{micEconAids}-package by @Henningsen14.
 The estimation of the AI-system is based on a data set by @Blanciforti86 that is part of \pkg{micEconAids}. The model estimated is based on four food commodities. As shown before missing parameters of the AI-system are estimated using `nlcom()`. Final results are compared to the results of an LA-AI-system estimated with SUR using @Henningsen14. The equation of the AI-system are created using `ai.model()`. This is an example function of a demand system model builder taking care of the restrictions of such models. This precise function is able to create AI-system equations using either the translog or the Stone price index, demographicaly scaled versions of this demand system as well as Quadratic Almost-Ideal Demand System variations of such models. Once such an implementation is complete it is straightforward to wrap the equation in a function such as `ai()` or `qai()`.
 
-```{r aids, cache=TRUE}
+```{r aids, cache=FALSE}
 library( "micEconAids" )
 
 data( "Blanciforti86" )
@@ -418,7 +418,7 @@ summary(estNlsur)
 ```
 
 
-```{r nlcom_aids, cache=TRUE}
+```{r nlcom_aids, cache=FALSE}
 ### caclulate missing parameters via AI-system restrictions
 
 # sum a_k = 1
@@ -452,7 +452,7 @@ g0403 <- nlcom(object = estNlsur, form = "g0304", rname = "g0403")
 
 Once all the parameters of the restricted model using `nlsur()` and the missing ones using `nlcom()` are obtained it is possible to directly compare `nlsur()` and `aidsEst()` results. Therefore the parameters and their differences are shown:
 
-```{r compare_systems, cache=TRUE, echo=FALSE}
+```{r compare_systems, cache=FALSE, echo=FALSE}
 est <- rbind(coef(summary(estNlsur)),
              a04, b04, g0104, g0204, g0304, g0404,
              g0201, g0301, g0302, g0401, g0402, g0403)
@@ -483,17 +483,18 @@ library(readstata13)
 dat <- read.dta13("food.dta")
 ```
 
-```{r qai, cache=TRUE}
+```{r qai, cache=FALSE}
 # dataset as proposed in Poi 2012. Stata results for comparisson available at
 # http://www.stata-journal.com/article.html?article=st0268
 
 w <- c("w1", "w2", "w3", "w4"); p <- c( "p1", "p2", "p3", "p4")
 x <- "expfd"; z <- c("nkids", "rural")
 
+# using a slightly different starting value
 res <- qai(w = w, p = p, x = x, z = z, a0 = 10,
            data = dat, scale = TRUE,
            logp = FALSE, logexp = FALSE,
-           MASS = TRUE)
+           MASS = TRUE, val = 0.001)
 
 summary(res)
 ```
@@ -502,7 +503,7 @@ summary(res)
 ##  Application: Weighting
 
 Although weighting is possible in `nlsur()`, it is only available using the blockwise matrix variation of the nlsur solution.
-```{r weighting, cache=TRUE}
+```{r weighting, cache=FALSE}
 
 # weighting
 set.seed(123)
